@@ -130,6 +130,7 @@ HL_PRIM void *hl_dyn_castp( void *data, hl_type *t, hl_type *to ) {
 		return *(void**)data;
 	switch( TK2(t->kind,to->kind) ) {
 	case TK2(HOBJ,HOBJ):
+	case TK2(HSTRUCT,HSTRUCT):
 		{
 			hl_type_obj *t1 = t->obj;
 			hl_type_obj *t2 = to->obj;
@@ -169,6 +170,7 @@ HL_PRIM void *hl_dyn_castp( void *data, hl_type *t, hl_type *to ) {
 	case TK2(HFUN,HDYN):
 	case TK2(HNULL,HDYN):
 	case TK2(HARRAY,HDYN):
+	// NO(HSTRUCT,HDYN)
 		return *(void**)data;
 	}
 	if( to->kind == HDYN )
@@ -352,6 +354,7 @@ HL_PRIM int hl_dyn_compare( vdynamic *a, vdynamic *b ) {
 	case TK2(HI32, HF64):
 		return dcompare((double)a->v.i,b->v.d);
 	case TK2(HOBJ,HOBJ):
+	case TK2(HSTRUCT,HSTRUCT):
 		if( a->t->obj->rt->compareFun )
 			return a->t->obj->rt->compareFun(a,b);
 		return a > b ? 1 : -1;
@@ -366,6 +369,14 @@ HL_PRIM int hl_dyn_compare( vdynamic *a, vdynamic *b ) {
 	case TK2(HVIRTUAL,HOBJ):
 	case TK2(HVIRTUAL,HDYNOBJ):
 		return hl_dyn_compare(((vvirtual*)a)->value,b);
+	case TK2(HFUN,HFUN):
+		if( ((vclosure*)a)->hasValue == 2 )
+			return hl_dyn_compare((vdynamic*)((vclosure_wrapper*)a)->wrappedFun,b);
+		if( ((vclosure*)b)->hasValue == 2 )
+			return hl_dyn_compare(a,(vdynamic*)((vclosure_wrapper*)b)->wrappedFun);
+		if( ((vclosure*)a)->fun != ((vclosure*)b)->fun )
+			return hl_invalid_comparison;
+		return hl_dyn_compare(((vclosure*)a)->value,((vclosure*)b)->value);
 	case TK2(HVIRTUAL,HVIRTUAL):
 		if( ((vvirtual*)a)->value && ((vvirtual*)b)->value )
 			return hl_dyn_compare(((vvirtual*)a)->value,((vvirtual*)b)->value);
@@ -374,7 +385,7 @@ HL_PRIM int hl_dyn_compare( vdynamic *a, vdynamic *b ) {
 	return hl_invalid_comparison;
 }
 
-HL_PRIM void hl_write_dyn( void *data, hl_type *t, vdynamic *v ) {
+HL_PRIM void hl_write_dyn( void *data, hl_type *t, vdynamic *v, bool is_tmp ) {
 	hl_track_call(HL_TRACK_CAST, on_cast(v?v->t:&hlt_dyn,t));
 	switch( t->kind ) {
 	case HUI8:
@@ -396,7 +407,14 @@ HL_PRIM void hl_write_dyn( void *data, hl_type *t, vdynamic *v ) {
 		*(double*)data = hl_dyn_castd(&v,&hlt_dyn);
 		break;
 	default:
-		*(void**)data = hl_dyn_castp(&v,&hlt_dyn,t);
+		{
+			void *ret = (v && hl_same_type(t,v->t)) ? v : hl_dyn_castp(&v,&hlt_dyn,t);
+			if( is_tmp && ret == v ) {
+				ret = hl_alloc_dynamic(v->t);
+				((vdynamic*)ret)->v = v->v;
+			}
+			*(void**)data = ret;
+		}
 		break;
 	}
 }
@@ -443,8 +461,8 @@ static bool is_number( hl_type *t ) {
 	return t->kind >= HUI8 && t->kind <= HBOOL;
 }
 
-#define FOP(op) { double va = hl_dyn_castd(a,&hlt_dyn); double vb = hl_dyn_castd(b,&hlt_dyn); return hl_dynf64(va op vb); }
-#define IOP(op) { int va = hl_dyn_casti(a,&hlt_dyn,&hlt_i32); int vb = hl_dyn_casti(b,&hlt_dyn,&hlt_i32); return hl_dyni32(va op vb); }
+#define FOP(op) { double va = hl_dyn_castd(&a,&hlt_dyn); double vb = hl_dyn_castd(&b,&hlt_dyn); return hl_dynf64(va op vb); }
+#define IOP(op) { int va = hl_dyn_casti(&a,&hlt_dyn,&hlt_i32); int vb = hl_dyn_casti(&b,&hlt_dyn,&hlt_i32); return hl_dyni32(va op vb); }
 
 HL_PRIM vdynamic *hl_dyn_op( int op, vdynamic *a, vdynamic *b ) {
 	static uchar *op_names[] = { USTR("+"), USTR("-"), USTR("*"), USTR("%"), USTR("/"), USTR("<<"), USTR(">>"), USTR(">>>"), USTR("&"), USTR("|"), USTR("^") };

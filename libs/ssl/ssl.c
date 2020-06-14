@@ -32,6 +32,14 @@ typedef int SOCKET;
 #include "mbedtls/x509_crt.h"
 #include "mbedtls/ssl.h"
 
+#ifdef HL_CONSOLE
+mbedtls_x509_crt *hl_init_cert_chain();
+#endif
+
+#if defined(HL_WIN) || defined(HL_MAC) || defined(HL_IOS) || defined(HL_TVOS)
+#	define MSG_NOSIGNAL 0
+#endif
+
 // Duplicate from socket.c
 typedef struct _hl_socket {
 	SOCKET sock;
@@ -130,14 +138,14 @@ static bool is_block_error() {
 }
 
 static int net_read(void *fd, unsigned char *buf, size_t len) {
-	int r = recv((SOCKET)(int_val)fd, (char *)buf, (int)len, 0);
+	int r = recv((SOCKET)(int_val)fd, (char *)buf, (int)len, MSG_NOSIGNAL);
 	if( r == SOCKET_ERROR && is_block_error() )
 		return MBEDTLS_ERR_SSL_WANT_READ;
 	return r;
 }
 
 static int net_write(void *fd, const unsigned char *buf, size_t len) {
-	int r = send((SOCKET)(int_val)fd, (char *)buf, (int)len, 0);
+	int r = send((SOCKET)(int_val)fd, (char *)buf, (int)len, MSG_NOSIGNAL);
 	if( r == SOCKET_ERROR && is_block_error() )
 		return MBEDTLS_ERR_SSL_WANT_WRITE;
 	return r;
@@ -294,6 +302,9 @@ DEFINE_PRIM(_VOID, conf_set_cert, TCONF TCERT TPKEY);
 DEFINE_PRIM(_VOID, conf_set_servername_callback, TCONF _FUN(_OBJ(TCERT TPKEY), _BYTES));
 
 HL_PRIM hl_ssl_cert *HL_NAME(cert_load_file)(vbyte *file) {
+#ifdef HL_CONSOLE
+	return NULL;
+#else
 	int r;
 	hl_ssl_cert *cert;
 	mbedtls_x509_crt *x = (mbedtls_x509_crt*)malloc(sizeof(mbedtls_x509_crt));
@@ -308,9 +319,13 @@ HL_PRIM hl_ssl_cert *HL_NAME(cert_load_file)(vbyte *file) {
 	cert->c = x;
 	cert->finalize = cert_finalize;
 	return cert;
+#endif
 }
 
 HL_PRIM hl_ssl_cert *HL_NAME(cert_load_path)(vbyte *path) {
+#ifdef HL_CONSOLE
+	return NULL;
+#else
 	int r;
 	hl_ssl_cert *cert;
 	mbedtls_x509_crt *x = (mbedtls_x509_crt*)malloc(sizeof(mbedtls_x509_crt));
@@ -325,6 +340,7 @@ HL_PRIM hl_ssl_cert *HL_NAME(cert_load_path)(vbyte *path) {
 	cert->c = x;
 	cert->finalize = cert_finalize;
 	return cert;
+#endif
 }
 
 HL_PRIM hl_ssl_cert *HL_NAME(cert_load_defaults)() {
@@ -379,6 +395,8 @@ HL_PRIM hl_ssl_cert *HL_NAME(cert_load_defaults)() {
 		}
 	}
 	CFRelease(keychain);
+#elif defined(HL_CONSOLE)
+	chain = hl_init_cert_chain();
 #endif
 	if (chain != NULL) {
 		v = (hl_ssl_cert*)hl_gc_alloc_finalizer(sizeof(hl_ssl_cert));

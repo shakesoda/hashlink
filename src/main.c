@@ -125,6 +125,7 @@ static void setup_handler() {
 	act.sa_handler = handle_signal;
 	act.sa_flags = 0;
 	sigemptyset(&act.sa_mask);
+	signal(SIGPIPE, SIG_IGN);
 	sigaction(SIGSEGV,&act,NULL);
 	sigaction(SIGTERM,&act,NULL);
 }
@@ -143,6 +144,7 @@ int main(int argc, pchar *argv[]) {
 	int debug_port = -1;
 	bool debug_wait = false;
 	bool hot_reload = false;
+	int profile_count = -1;
 	main_context ctx;
 	bool isExc = false;
 	int first_boot_arg = -1;
@@ -162,11 +164,16 @@ int main(int argc, pchar *argv[]) {
 			continue;
 		}
 		if( pcompare(arg,PSTR("--version")) == 0 ) {
-			printf("%d.%d.%d",HL_VERSION>>8,(HL_VERSION>>4)&15,HL_VERSION&15);
+			printf("%d.%d.%d",HL_VERSION>>16,(HL_VERSION>>8)&0xFF,HL_VERSION&0xFF);
 			return 0;
 		}
 		if( pcompare(arg,PSTR("--hot-reload")) == 0 ) {
 			hot_reload = true;
+			continue;
+		}
+		if( pcompare(arg,PSTR("--profile")) == 0 ) {
+			if( argc-- == 0 ) break;
+			profile_count = ptoi(*argv++);
 			continue;
 		}
 		if( *arg == '-' || *arg == '+' ) {
@@ -186,7 +193,7 @@ int main(int argc, pchar *argv[]) {
 		file = PSTR("hlboot.dat");
 		fchk = pfopen(file,"rb");
 		if( fchk == NULL ) {
-			printf("HL/JIT %d.%d.%d (c)2015-2018 Haxe Foundation\n  Usage : hl [--debug <port>] [--debug-wait] <file>\n",HL_VERSION>>8,(HL_VERSION>>4)&15,HL_VERSION&15);
+			printf("HL/JIT %d.%d.%d (c)2015-2020 Haxe Foundation\n  Usage : hl [--debug <port>] [--debug-wait] <file>\n",HL_VERSION>>16,(HL_VERSION>>8)&0xFF,HL_VERSION&0xFF);
 			return 1;
 		}
 		fclose(fchk);
@@ -222,7 +229,9 @@ int main(int argc, pchar *argv[]) {
 	ctx.c.fun = ctx.m->functions_ptrs[ctx.m->code->entrypoint];
 	ctx.c.hasValue = 0;
 	setup_handler();
+	hl_profile_setup(profile_count);
 	ctx.ret = hl_dyn_call_safe(&ctx.c,NULL,0,&isExc);
+	hl_profile_end();
 	if( isExc ) {
 		varray *a = hl_exception_stack();
 		int i;

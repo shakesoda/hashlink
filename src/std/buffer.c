@@ -229,10 +229,11 @@ static void hl_buffer_rec( hl_buffer *b, vdynamic *v, vlist *stack ) {
 		hl_buffer_str_sub(b, buf, usprintf(buf, 32, _PTR_FMT,(int_val)v->v.ptr));
 		break;
 	case HOBJ:
+	case HSTRUCT:
 		{
 			hl_type_obj *o = v->t->obj;
 			if( o->rt == NULL || o->rt->toStringFun == NULL ) {
-				hl_buffer_char(b,'#');
+				if( v->t->kind == HSTRUCT ) hl_buffer_char(b,'@');
 				hl_buffer_str(b,o->name);
 			} else
 				hl_buffer_str(b,o->rt->toStringFun(v));
@@ -383,6 +384,10 @@ HL_PRIM void hl_buffer_val( hl_buffer *b, vdynamic *v ) {
 }
 
 HL_PRIM uchar *hl_to_string( vdynamic *v ) {
+	if( v == NULL )
+		return USTR("null");
+	if( v->t->kind == HBOOL )
+		return v->v.b ? USTR("true") : USTR("false");
 	hl_buffer *b = hl_alloc_buffer();
 	hl_buffer_val(b,v);
 	hl_buffer_char(b,0);

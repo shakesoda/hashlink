@@ -1,10 +1,13 @@
 #define HL_NAME(n) sdl_##n
 
 #include <hl.h>
+#include <locale.h>
 
-#if defined(_WIN32) || defined(__ANDROID__)
+#if defined(_WIN32) || defined(__ANDROID__) || defined(HL_IOS) || defined(HL_TVOS)
 #	include <SDL.h>
 #	include <SDL_syswm.h>
+#elif defined(HL_MAC)
+#	include <SDL.h>
 #else
 #	include <SDL2/SDL.h>
 #endif
@@ -12,7 +15,6 @@
 #if defined (HL_IOS) || defined(HL_TVOS)
 #	include <OpenGLES/ES3/gl.h>
 #	include <OpenGLES/ES3/glext.h>
-#	include <SDL2/SDL_syswm.h>
 #endif
 
 #ifndef SDL_MAJOR_VERSION
@@ -46,6 +48,13 @@ typedef enum {
 	TouchDown = 200,
 	TouchUp,
 	TouchMove,
+	JoystickAxisMotion = 300,
+	JoystickBallMotion,
+	JoystickHatMotion,
+	JoystickButtonDown,
+	JoystickButtonUp,
+	JoystickAdded,
+	JoystickRemoved,
 } event_type;
 
 typedef enum {
@@ -75,10 +84,12 @@ typedef struct {
 	int wheelDelta;
 	ws_change state;
 	int keyCode;
+	int scanCode;
 	bool keyRepeat;
 	int controller;
 	int value;
 	int fingerId;
+	int joystick;
 } event_data;
 
 // workaround for _extremely_ slow (5-10 seconds) gamepad init on some windows 10 systems.
@@ -98,6 +109,7 @@ HL_PRIM bool HL_NAME(init_once)() {
 		return false;
 	}
 	SDL_CreateThread(init_gamepad, "Gamepad Workaround", NULL);
+	setlocale(LC_NUMERIC, "C");
 #	ifdef _WIN32
 	// Set the internal windows timer period to 1ms (will give accurate sleep for vsync)
 	timeBeginPeriod(1);
@@ -140,6 +152,10 @@ HL_PRIM void HL_NAME(gl_options)( int major, int minor, int depth, int stencil, 
 	}
 }
 
+HL_PRIM bool HL_NAME(hint_value)( vbyte* name, vbyte* value) {
+	return SDL_SetHint((char*)name, (char*)value) == SDL_TRUE;
+}
+
 HL_PRIM bool HL_NAME(event_loop)( event_data *event ) {
 	while (true) {
 		SDL_Event e;
@@ -158,11 +174,13 @@ HL_PRIM bool HL_NAME(event_loop)( event_data *event ) {
 		case SDL_KEYDOWN:
 			event->type = KeyDown;
 			event->keyCode = e.key.keysym.sym;
+			event->scanCode = e.key.keysym.scancode;
 			event->keyRepeat = e.key.repeat != 0;
 			break;
 		case SDL_KEYUP:
 			event->type = KeyUp;
 			event->keyCode = e.key.keysym.sym;
+			event->scanCode = e.key.keysym.scancode;
 			break;
 		case SDL_SYSWMEVENT:
 			continue;
@@ -180,20 +198,20 @@ HL_PRIM bool HL_NAME(event_loop)( event_data *event ) {
 			break;
 		case SDL_FINGERDOWN:
 			event->type = TouchDown;
-			event->mouseX = (int)(e.tfinger.x*100);
-			event->mouseY = (int)(e.tfinger.y*100);
+			event->mouseX = (int)(e.tfinger.x*10000);
+			event->mouseY = (int)(e.tfinger.y*10000);
 			event->fingerId = (int)e.tfinger.fingerId;
 			break;
 		case SDL_FINGERMOTION:
 			event->type = TouchMove;
-			event->mouseX = (int)(e.tfinger.x*100);
-			event->mouseY = (int)(e.tfinger.y*100);
+			event->mouseX = (int)(e.tfinger.x*10000);
+			event->mouseY = (int)(e.tfinger.y*10000);
 			event->fingerId = (int)e.tfinger.fingerId;
 			break;
 		case SDL_FINGERUP:
 			event->type = TouchUp;
-			event->mouseX = (int)(e.tfinger.x*100);
-			event->mouseY = (int)(e.tfinger.y*100);
+			event->mouseX = (int)(e.tfinger.x*10000);
+			event->mouseY = (int)(e.tfinger.y*10000);
 			event->fingerId = (int)e.tfinger.fingerId;
 			break;
 		case SDL_MOUSEWHEEL:
@@ -220,7 +238,7 @@ HL_PRIM bool HL_NAME(event_loop)( event_data *event ) {
 			case SDL_WINDOWEVENT_MOVED:
 				event->state = Move;
 				break;
-			case SDL_WINDOWEVENT_RESIZED:
+			case SDL_WINDOWEVENT_SIZE_CHANGED:
 				event->state = Resize;
 				break;
 			case SDL_WINDOWEVENT_MINIMIZED:
@@ -283,6 +301,43 @@ HL_PRIM bool HL_NAME(event_loop)( event_data *event ) {
 			event->controller = e.caxis.which;
 			event->button = e.caxis.axis;
 			event->value = e.caxis.value;
+			break;
+		case SDL_JOYAXISMOTION:
+			event->type = JoystickAxisMotion;
+			event->joystick = e.jaxis.which;
+			event->button = e.jaxis.axis;
+			event->value = e.jaxis.value;
+			break;
+		case SDL_JOYBALLMOTION:
+			event->type = JoystickBallMotion;
+			event->joystick = e.jball.which;
+			event->button = e.jball.ball;
+			event->mouseXRel = e.jball.xrel;
+			event->mouseYRel = e.jball.yrel;
+			break;
+		case SDL_JOYHATMOTION:
+			event->type = JoystickHatMotion;
+			event->joystick = e.jhat.which;
+			event->button = e.jhat.hat;
+			event->value = e.jhat.value;
+			break;
+		case SDL_JOYBUTTONDOWN:
+			event->type = JoystickButtonDown;
+			event->joystick = e.jbutton.which;
+			event->button = e.jbutton.button;
+			break;
+		case SDL_JOYBUTTONUP:
+			event->type = JoystickButtonUp;
+			event->joystick = e.jbutton.which;
+			event->button = e.jbutton.button;
+			break;
+		case SDL_JOYDEVICEADDED:
+			event->type = JoystickAdded;
+			event->joystick = e.jdevice.which;
+			break;
+		case SDL_JOYDEVICEREMOVED:
+			event->type = JoystickRemoved;
+			event->joystick = e.jdevice.which;
 			break;
 		default:
 			//printf("Unknown event type 0x%X\\n", e.type);
@@ -363,7 +418,7 @@ HL_PRIM const char *HL_NAME(detect_keyboard_layout)() {
 
 DEFINE_PRIM(_BOOL, init_once, _NO_ARG);
 DEFINE_PRIM(_VOID, gl_options, _I32 _I32 _I32 _I32 _I32 _I32);
-DEFINE_PRIM(_BOOL, event_loop, _OBJ(_I32 _I32 _I32 _I32 _I32 _I32 _I32 _I32 _I32 _BOOL _I32 _I32 _I32) );
+DEFINE_PRIM(_BOOL, event_loop, _DYN );
 DEFINE_PRIM(_VOID, quit, _NO_ARG);
 DEFINE_PRIM(_VOID, delay, _I32);
 DEFINE_PRIM(_I32, get_screen_width, _NO_ARG);
@@ -374,6 +429,7 @@ DEFINE_PRIM(_BOOL, detect_win32, _NO_ARG);
 DEFINE_PRIM(_VOID, text_input, _BOOL);
 DEFINE_PRIM(_I32, set_relative_mouse_mode, _BOOL);
 DEFINE_PRIM(_BYTES, detect_keyboard_layout, _NO_ARG);
+DEFINE_PRIM(_BOOL, hint_value, _BYTES _BYTES);
 
 // Window
 
@@ -417,6 +473,7 @@ HL_PRIM bool HL_NAME(win_set_fullscreen)(SDL_Window *win, int mode) {
 		// exit borderless
 		SetWindowLong(wnd,GWL_STYLE,save->style);
 		SetWindowPos(wnd,NULL,save->x,save->y,save->w,save->h,0);
+		SDL_SetWindowSize(win, save->w, save->h);
 		free(save);
 		SDL_SetWindowData(win,"save",NULL);
 		save = NULL;
@@ -448,7 +505,7 @@ HL_PRIM bool HL_NAME(win_set_fullscreen)(SDL_Window *win, int mode) {
 			return true;
 		}
 #	else
-		break;
+		return SDL_SetWindowFullscreen(win, SDL_WINDOW_FULLSCREEN_DESKTOP) == 0;
 #	endif
 	case 3:
 		return SDL_SetWindowFullscreen(win, SDL_WINDOW_FULLSCREEN) == 0;
@@ -630,6 +687,49 @@ DEFINE_PRIM(_VOID, haptic_close, THAPTIC);
 DEFINE_PRIM(_I32, haptic_rumble_init, THAPTIC);
 DEFINE_PRIM(_I32, haptic_rumble_play, THAPTIC _F64 _I32);
 
+// joystick
+
+HL_PRIM int HL_NAME(joy_count)() {
+	return SDL_NumJoysticks();
+}
+
+HL_PRIM SDL_Joystick *HL_NAME(joy_open)(int idx) {
+	return SDL_JoystickOpen(idx);
+}
+
+HL_PRIM void HL_NAME(joy_close)(SDL_Joystick *joystick) {
+	SDL_JoystickClose(joystick);
+}
+
+HL_PRIM int HL_NAME(joy_get_axis)(SDL_Joystick *joystick, int axisIdx ){
+	return SDL_JoystickGetAxis(joystick, axisIdx);
+}
+
+HL_PRIM int HL_NAME(joy_get_hat)(SDL_Joystick *joystick, int hatIdx ){
+	return SDL_JoystickGetHat(joystick, hatIdx);
+}
+
+HL_PRIM bool HL_NAME(joy_get_button)(SDL_Joystick *joystick, int btnIdx) {
+	return SDL_JoystickGetButton(joystick, btnIdx) == 1;
+}
+
+HL_PRIM int HL_NAME(joy_get_id)(SDL_Joystick *joystick) {
+	return SDL_JoystickInstanceID(joystick);
+}
+
+HL_PRIM vbyte *HL_NAME(joy_get_name)(SDL_Joystick *joystick) {
+	return (vbyte*)SDL_JoystickName(joystick);
+}
+
+#define TJOY _ABSTRACT(sdl_joystick)
+DEFINE_PRIM(_I32, joy_count, _NO_ARG);
+DEFINE_PRIM(TJOY, joy_open, _I32);
+DEFINE_PRIM(_VOID, joy_close, TJOY);
+DEFINE_PRIM(_I32, joy_get_axis, TJOY _I32);
+DEFINE_PRIM(_I32, joy_get_hat, TJOY _I32);
+DEFINE_PRIM(_BOOL, joy_get_button, TJOY _I32);
+DEFINE_PRIM(_I32, joy_get_id, TJOY);
+DEFINE_PRIM(_BYTES, joy_get_name, TJOY);
 
 // surface
 
